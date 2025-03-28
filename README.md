@@ -1,9 +1,8 @@
 # ComfyUI-GPT-API
 
-通过API直接调用GPT系列模型的ComfyUI扩展节点集合。该项目提供了一系列自定义节点（计划），让您可以在ComfyUI工作流中访问GPT的各种功能。
+[English](README_EN.md) | 中文
 
-
-欢迎通过Issues提出您的功能建议！
+通过API直接调用GPT系列模型的ComfyUI扩展节点集合。该项目提供了一系列自定义节点（计划）
 
 ## 安装方法
 
@@ -30,6 +29,8 @@ pip install -r requirements.txt
 通过API直接调用GPT-4o生成图像，可使用参考图像引导生成过程。
 
 #### 使用方法
+
+![alt text](workflow/ComfyUI-GPT-API.png)
 
 1. 从节点浏览器中找到"GPT4o Image Generation"节点并添加到工作流中
 2. 输入您的GPT API密钥、自定义API地址和模型名称（只需首次设置，将自动保存）

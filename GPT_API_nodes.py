@@ -183,21 +183,46 @@ class GPTImageGenerator:
             # 获取API密钥和配置
             config = self.load_config()
             
-            # 如果用户提供了API密钥，保存整个配置
-            if api_key and len(api_key) > 10:
-                self.save_config(api_key, api_url, model)
+            # 判断是否需要保存配置（API key、URL或model中任何一个与已保存的不同）
+            should_save_config = False
+            has_valid_api_key = api_key and len(api_key) > 10
+            
+            # 使用API密钥（优先使用用户输入，否则使用保存的）
+            if has_valid_api_key:
                 actual_api_key = api_key
-                actual_api_url = api_url
-                actual_model = model
+                # 如果API密钥变化，需要保存配置
+                if actual_api_key != config["api_key"]:
+                    should_save_config = True
             else:
-                # 否则使用已保存的配置
                 actual_api_key = config["api_key"]
-                actual_api_url = api_url or config["api_url"]
-                actual_model = model or config["model"]
+            
+            # 使用API URL（检查是否有变化，避免空值覆盖已保存的值）
+            if api_url and api_url.strip():  # 确保不是空字符串
+                actual_api_url = api_url
+                if actual_api_url != config["api_url"]:
+                    should_save_config = True
+            else:
+                actual_api_url = config["api_url"]
+            
+            # 使用模型（检查是否有变化，避免空值覆盖已保存的值）
+            if model and model.strip():  # 确保不是空字符串
+                actual_model = model
+                if actual_model != config["model"]:
+                    should_save_config = True
+            else:
+                actual_model = config["model"]
                 
-                # 记录使用的配置
-                if actual_api_key:
-                    self.log("使用已保存的API配置")
+            # 如果需要保存并且有有效的API密钥，保存所有配置
+            if should_save_config and actual_api_key:
+                self.log("检测到配置变化，正在保存新配置...")
+                self.save_config(actual_api_key, actual_api_url, actual_model)
+                
+            # 记录使用的配置
+            if actual_api_key:
+                if should_save_config:
+                    self.log("使用并保存了新的API配置")
+                else:
+                    self.log("使用现有API配置")
                 
             if not actual_api_key:
                 error_message = "错误: 未提供有效的API密钥。请在节点中输入API密钥或确保已保存密钥。"
