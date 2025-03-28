@@ -1,0 +1,4 @@
+Pillow>=10.1.0
+requests
+numpy
+torch
