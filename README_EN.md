@@ -26,17 +26,38 @@ pip install -r requirements.txt
 
 #### Features
 
-Directly call GPT-4o via API to generate images, with the ability to use reference images to guide the generation process.
+Directly call GPT-4o via API to generate images, with the ability to use reference images to guide the generation process. Supports image quality control and random seed settings.
 
 #### How to Use
 
 ![workflow example](workflow/ComfyUI-GPT-API.png)
 
+![alt text](image/GPT-API.png)
+
 1. Find the "GPT4o Image Generation" node in the node browser and add it to your workflow
 2. Enter your GPT API key, custom API address, and model name (these only need to be set once and will be automatically saved)
 3. Write your image generation prompt
-4. Connect a reference image to the images input (required)
-5. Run the workflow, and the node will call the API to generate an image and return it
+4. Connect one or more reference images to the images input (required)
+5. Set the random seed and image processing quality parameters
+6. Run the workflow, and the node will call the API to generate an image and return it
+
+#### Node Parameters
+
+##### Required Parameters
+- **prompt**: The image generation prompt that describes the image you want to create
+- **api_key**: Your OpenAI API key (will be saved automatically after first use)
+- **model**: The model name to use (e.g., "gpt-4o-all")
+- **api_url**: The API endpoint URL
+- **images**: Reference image input (supports multiple images)
+- **seed**: Random seed value
+
+##### Optional Parameters
+- **max_image_size**: Maximum image dimension (default 1024 pixels)
+- **image_quality**: JPEG compression quality (50-100)
+- **image_detail**: Image processing quality, affects token usage and detail level
+  - **auto**: Automatically select processing quality (default)
+  - **high**: High-quality processing with more image details, but consumes more tokens
+  - **low**: Low-quality processing, uses fewer tokens, suitable for simple tasks
 
 ## Notes
 
@@ -44,7 +65,8 @@ Directly call GPT-4o via API to generate images, with the ability to use referen
 - API calls may take some time, please be patient
 - Image generation is subject to the limitations and rules of the API service provider
 - When the seed value is set to 0, the system will generate a random valid seed
-- All configurations (API key, URL, model) will be saved to the node directory and automatically loaded next time
+- All configurations (API key, URL, model) will be saved to the node's local directory and automatically loaded next time
+- User-provided parameters always take precedence over saved configurations
 
 ## Troubleshooting
 

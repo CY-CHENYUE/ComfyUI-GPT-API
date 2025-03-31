@@ -28,6 +28,9 @@ class GPTImageGenerator:
                 "seed": ("INT", {"default": 66666666, "min": 0, "max": 4294967295}),
             },
             "optional": {
+                "max_image_size": ("INT", {"default": 1024, "min": 256, "max": 2048}),
+                "image_quality": ("INT", {"default": 85, "min": 50, "max": 100}),
+                "image_detail": (["auto", "high", "low"], {"default": "auto"}),
             }
         }
 
@@ -132,8 +135,8 @@ class GPTImageGenerator:
         self.log(f"创建ComfyUI兼容的空白图像: 形状={tensor.shape}, 类型={tensor.dtype}")
         return tensor
     
-    def encode_images_to_base64(self, image_tensor):
-        """将ComfyUI的图像张量(单张或多张)转换为base64编码的列表"""
+    def encode_images_to_base64(self, image_tensor, max_dimension=1024, quality=85):
+        """将ComfyUI的图像张量(单张或多张)转换为base64编码的列表，并进行压缩处理"""
         try:
             # 确定图像数量
             batch_size = image_tensor.shape[0]
@@ -150,13 +153,32 @@ class GPTImageGenerator:
                 input_image = (input_image * 255).astype(np.uint8)
                 pil_image = Image.fromarray(input_image)
                 
+                original_width, original_height = pil_image.width, pil_image.height
+                self.log(f"参考图像 {i+1} 原始尺寸: {original_width}x{original_height}")
+                
+                # 检查是否需要调整大小
+                if original_width > max_dimension or original_height > max_dimension:
+                    # 计算等比例缩放
+                    if original_width > original_height:
+                        new_width = max_dimension
+                        new_height = int(original_height * (max_dimension / original_width))
+                    else:
+                        new_height = max_dimension
+                        new_width = int(original_width * (max_dimension / original_height))
+                    
+                    # 调整图像大小
+                    pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
+                    self.log(f"参考图像 {i+1} 已调整尺寸: {new_width}x{new_height}")
+                
                 self.log(f"参考图像 {i+1} 处理成功，尺寸: {pil_image.width}x{pil_image.height}")
                 
-                # 转换为base64
+                # 转换为base64，使用JPEG格式和压缩
                 buffered = BytesIO()
-                pil_image.save(buffered, format="PNG")
+                pil_image.save(buffered, format="JPEG", quality=quality)
                 img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                img_size = len(img_str) / 1024  # 大小(KB)
                 
+                self.log(f"参考图像 {i+1} 编码大小: {img_size:.2f} KB")
                 base64_images.append(img_str)
             
             return base64_images
@@ -164,8 +186,8 @@ class GPTImageGenerator:
             self.log(f"图像转base64编码失败: {str(e)}")
             return None
     
-    def generate_image(self, prompt, api_key, model, api_url, images, seed):
-        """生成图像 - 支持参考图片(单张或多张)，可设置随机种子"""
+    def generate_image(self, prompt, api_key, model, api_url, images, seed, max_image_size=1024, image_quality=85, image_detail="auto"):
+        """生成图像 - 支持参考图片(单张或多张)，可设置随机种子和图像处理质量"""
         response_text = ""
         
         # 重置日志消息
@@ -240,14 +262,14 @@ class GPTImageGenerator:
             content_items = []
             
             # 添加提示文本（在用户提示词前加上指示生成图片的引导语）
-            image_generation_prompt = "Generate an image based on this description. Please provide the image directly as a URL or base64 data. Do not add explanations in your response, just return the image. Description:\n\n" + prompt
+            image_generation_prompt = "Create image"+prompt 
             content_items.append({
                 "type": "text",
                 "text": image_generation_prompt
             })
             
             # 添加图像（现在是必需的，可以是多张）
-            base64_images = self.encode_images_to_base64(images)
+            base64_images = self.encode_images_to_base64(images, max_dimension=max_image_size, quality=image_quality)
             if not base64_images or len(base64_images) == 0:
                 error_message = "错误: 无法编码输入图像。请检查图像是否有效。"
                 self.log(error_message)
@@ -255,11 +277,12 @@ class GPTImageGenerator:
             
             # 添加所有图像到请求中
             for i, img_base64 in enumerate(base64_images):
-                self.log(f"将图像 {i+1} 添加到请求中")
+                self.log(f"将图像 {i+1} 添加到请求中，图像处理质量: {image_detail}")
                 content_items.append({
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}"
+                        "url": f"data:image/jpeg;base64,{img_base64}",
+                        "detail": image_detail
                     }
                 })
             
@@ -279,6 +302,20 @@ class GPTImageGenerator:
             
             # 记录请求信息
             self.log(f"请求GPT API，模型: {actual_model}，包含 {len(base64_images)} 张图像，种子: {seed}")
+            self.log(f"图像处理质量: {image_detail}")
+            
+            # 提供token估算信息
+            token_estimation = 0
+            if image_detail == "low":
+                token_estimation = 85 * len(base64_images)
+                self.log(f"图像token估算: 每张图像85个token (低质量)，总计约 {token_estimation} 个token")
+            elif image_detail == "high":
+                # 高质量模式下的token估算比较复杂，这里给出一个粗略估计
+                token_estimation = len(base64_images) * 765  # 假设每张图像为1024x1024，消耗约765个token
+                self.log(f"图像token估算: 每张图像约765个token (高质量，基于1024x1024图像)，总计约 {token_estimation} 个token")
+            else:  # auto
+                token_estimation = len(base64_images) * 425  # 介于高低质量之间
+                self.log(f"图像token估算: 每张图像约425个token (自动质量)，总计约 {token_estimation} 个token")
             
             # 发送API请求
             self.log(f"发送API请求到: {actual_api_url}")
@@ -292,7 +329,11 @@ class GPTImageGenerator:
             if status_code != 200:
                 error_msg = f"API请求失败，状态码: {status_code}，响应: {response.text}"
                 self.log(error_msg)
-                return (self.generate_empty_image(512, 512), error_msg)  # 返回空白图像
+                
+                # 构建错误返回文本
+                full_error_text = f"## 错误\n{error_msg}\n\n## 请求信息\n模型: {actual_model}\n提示词: {prompt}\n种子: {seed}\n图像处理质量: {image_detail}\n估计token消耗: {token_estimation}\n\n## 处理日志\n" + "\n".join(self.log_messages)
+                
+                return (self.generate_empty_image(512, 512), full_error_text)  # 返回空白图像
             
             # 解析响应
             response_json = response.json()
@@ -308,7 +349,7 @@ class GPTImageGenerator:
                     if "content" in message:
                         # 获取GPT回复的文本内容
                         text_content = message["content"]
-                        self.log(f"提取到GPT响应文本: {text_content[:100]}..." if len(text_content) > 100 else text_content)
+                        self.log(f"提取到GPT响应文本: {text_content}" )
                         
                         # 检查是否包含base64图像数据
                         image_data_match = None
@@ -347,6 +388,8 @@ class GPTImageGenerator:
                                     result_text = f"## GPT响应\n\n{text_content}\n\n"
                                     result_text += f"\n## 处理信息\n已从URL加载图像: {urls[0]}"
                                     result_text += f"\n种子: {seed}"
+                                    result_text += f"\n图像处理质量: {image_detail}"
+                                    result_text += f"\n估计token消耗: {token_estimation}"
                                     result_text += f"\n\n## 处理日志\n" + "\n".join(self.log_messages)
                                     
                                     return (img_tensor, result_text)
@@ -375,6 +418,8 @@ class GPTImageGenerator:
                                 result_text = f"## GPT响应\n\n{text_content}\n\n"
                                 result_text += f"\n## 处理信息\n已从base64数据加载图像"
                                 result_text += f"\n种子: {seed}"
+                                result_text += f"\n图像处理质量: {image_detail}"
+                                result_text += f"\n估计token消耗: {token_estimation}"
                                 result_text += f"\n\n## 处理日志\n" + "\n".join(self.log_messages)
                                 
                                 return (img_tensor, result_text)
@@ -390,6 +435,8 @@ class GPTImageGenerator:
                         # 构建返回文本
                         result_text = f"## GPT响应\n\n{text_content}\n\n"
                         result_text += f"\n## 请求信息\n模型: {actual_model}\n提示词: {prompt}\n种子: {seed}"
+                        result_text += f"\n图像处理质量: {image_detail}"
+                        result_text += f"\n估计token消耗: {token_estimation}"
                         result_text += f"\n\n## 处理日志\n" + "\n".join(self.log_messages)
                         
                         return (empty_img, result_text)
@@ -401,7 +448,7 @@ class GPTImageGenerator:
             
             # 如果无法提取有效内容，返回原始响应
             self.log("无法从响应中提取有效的图像或文本内容")
-            full_text = f"## API响应\n" + response_text + f"\n\n## 种子\n{seed}\n\n## 处理日志\n" + "\n".join(self.log_messages)
+            full_text = f"## API响应\n" + response_text + f"\n\n## 请求信息\n模型: {actual_model}\n提示词: {prompt}\n种子: {seed}\n图像处理质量: {image_detail}\n估计token消耗: {token_estimation}\n\n## 处理日志\n" + "\n".join(self.log_messages)
             return (self.generate_empty_image(512, 512), full_text)  # 返回空白图像
         
         except Exception as e:
@@ -410,7 +457,7 @@ class GPTImageGenerator:
             traceback.print_exc()
             
             # 合并日志和错误信息
-            full_text = f"## 错误\n" + error_message + f"\n\n## 种子\n{seed}\n\n## 处理日志\n" + "\n".join(self.log_messages)
+            full_text = f"## 错误\n" + error_message + f"\n\n## 请求信息\n模型: {actual_model if 'actual_model' in locals() else '未知'}\n提示词: {prompt}\n种子: {seed}\n图像处理质量: {image_detail}\n估计token消耗: {token_estimation if 'token_estimation' in locals() else '未知'}\n\n## 处理日志\n" + "\n".join(self.log_messages)
             return (self.generate_empty_image(512, 512), full_text)  # 返回空白图像
 
 # 注册节点
