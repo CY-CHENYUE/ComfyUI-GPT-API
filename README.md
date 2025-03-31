@@ -30,9 +30,11 @@ pip install -r requirements.txt
 
 #### 使用方法
 
+![alt text](image/标记与吉卜力.jpg)
+
 ![alt text](workflow/ComfyUI-GPT-API.png)
 
-![alt text](image/GPT-API.png)
+
 
 1. 从节点浏览器中找到"GPT4o Image Generation"节点并添加到工作流中
 2. 输入您的GPT API密钥、自定义API地址和模型名称（只需首次设置，将自动保存）

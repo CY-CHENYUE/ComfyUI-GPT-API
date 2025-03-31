@@ -30,9 +30,11 @@ Directly call GPT-4o via API to generate images, with the ability to use referen
 
 #### How to Use
 
+![alt text](image/标记与吉卜力.jpg)
+
 ![workflow example](workflow/ComfyUI-GPT-API.png)
 
-![alt text](image/GPT-API.png)
+
 
 1. Find the "GPT4o Image Generation" node in the node browser and add it to your workflow
 2. Enter your GPT API key, custom API address, and model name (these only need to be set once and will be automatically saved)
