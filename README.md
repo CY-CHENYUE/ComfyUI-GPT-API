@@ -30,7 +30,7 @@ pip install -r requirements.txt
 
 #### 使用方法
 
-![alt text](image/标记与吉卜力.jpg)
+![alt text](image/视觉社.png)
 
 ![alt text](workflow/ComfyUI-GPT-API.png)
 

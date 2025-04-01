@@ -30,7 +30,7 @@ Directly call GPT-4o via API to generate images, with the ability to use referen
 
 #### How to Use
 
-![alt text](image/标记与吉卜力.jpg)
+![alt text](image/视觉社.png)
 
 ![workflow example](workflow/ComfyUI-GPT-API.png)
 
