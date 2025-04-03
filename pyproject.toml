@@ -1,0 +1,15 @@
+[project]
+name = "gpt-api"
+description = "A custom node for ComfyUI to integrate GPT API."
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["Pillow>=10.1.0", "requests", "numpy", "torch"]
+
+[project.urls]
+Repository = "https://github.com/CY-CHENYUE/ComfyUI-GPT-API"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI-GPT-API"
+Icon = ""
