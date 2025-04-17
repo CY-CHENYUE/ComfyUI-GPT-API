@@ -349,97 +349,160 @@ class GPTImageGenerator:
                     if "content" in message:
                         # 获取GPT回复的文本内容
                         text_content = message["content"]
-                        self.log(f"提取到GPT响应文本: {text_content}" )
+                        self.log(f"提取到GPT响应文本: {text_content}")
                         
-                        # 检查是否包含base64图像数据
-                        image_data_match = None
+                        # 检查是否包含图像数据 (URL 或 Base64)
+                        image_tensor = None
+                        result_text = ""
                         
-                        # 尝试查找文本中可能包含的图像URL
+                        # --- 1. 尝试从文本中提取所有可能的图像URL ---
                         import re
-                        # 查找可能的图像URL
-                        url_pattern = r'https?://[^\s<>"]+\.(?:jpg|jpeg|png|gif|webp)'
-                        urls = re.findall(url_pattern, text_content)
                         
-                        # 查找可能的base64图像数据
-                        base64_pattern = r'data:image\/[^;]+;base64,([a-zA-Z0-9+/=]+)'
-                        base64_matches = re.findall(base64_pattern, text_content)
+                        # 查找Markdown格式图像链接: ![...](URL)
+                        markdown_pattern = r'!\[.*?\]\((https?://[^)\s]+)\)'
                         
-                        if urls:
-                            # 如果找到URL，尝试下载第一个图像
-                            self.log(f"在响应中发现图像URL: {urls[0]}")
+                        # 查找链接中包含常见图片域名的URL (filesystem.site特别处理)
+                        domain_pattern = r'(https?://(?:filesystem\.site|cdn|img|image)[^)\s\"\'<>]+)'
+                        
+                        # 查找以常见图片格式结尾的URL
+                        format_pattern = r'(https?://[^)\s\"\'<>]+\.(?:png|jpg|jpeg|gif|webp))'
+                        
+                        # 查找openai视频URL (特殊处理)
+                        openai_pattern = r'(https?://videos\.openai\.com[^)\s\"\'<>]+)'
+                        
+                        # 收集所有找到的URL
+                        all_urls = []
+                        
+                        # 提取Markdown图片链接 (这是最可能的正确格式)
+                        markdown_urls = re.findall(markdown_pattern, text_content)
+                        if markdown_urls:
+                            self.log(f"找到 {len(markdown_urls)} 个Markdown图片链接")
+                            all_urls.extend(markdown_urls)
+                        
+                        # 提取图片域名URL (备选方案1)
+                        domain_urls = re.findall(domain_pattern, text_content)
+                        if domain_urls:
+                            self.log(f"找到 {len(domain_urls)} 个图片域名URL")
+                            all_urls.extend(domain_urls)
+                        
+                        # 提取图片格式URL (备选方案2)
+                        format_urls = re.findall(format_pattern, text_content)
+                        if format_urls:
+                            self.log(f"找到 {len(format_urls)} 个图片格式URL")
+                            all_urls.extend(format_urls)
+                        
+                        # 提取OpenAI视频URL (备选方案3)
+                        openai_urls = re.findall(openai_pattern, text_content)
+                        if openai_urls:
+                            self.log(f"找到 {len(openai_urls)} 个OpenAI视频URL")
+                            all_urls.extend(openai_urls)
+                        
+                        # 去重并保持顺序 (优先使用Markdown链接中的URL)
+                        unique_urls = []
+                        seen = set()
+                        for url in all_urls:
+                            # 清理URL (移除可能的引号或括号)
+                            clean_url = url.strip('"\'()<>')
+                            if clean_url not in seen:
+                                seen.add(clean_url)
+                                unique_urls.append(clean_url)
+                        
+                        self.log(f"共找到 {len(unique_urls)} 个唯一图像URL")
+                        for i, url in enumerate(unique_urls):
+                            self.log(f"URL {i+1}: {url}")
+                        
+                        # --- 2. 尝试从URL加载图像 ---
+                        image_processed_successfully = False
+                        
+                        for url in unique_urls:
+                            self.log(f"尝试从URL加载图像: {url}")
                             try:
-                                img_response = requests.get(urls[0])
-                                if img_response.status_code == 200:
-                                    # 从URL加载图像
-                                    buffer = BytesIO(img_response.content)
-                                    pil_image = Image.open(buffer)
-                                    
-                                    # 确保是RGB模式
-                                    if pil_image.mode != 'RGB':
-                                        pil_image = pil_image.convert('RGB')
-                                    
-                                    self.log(f"成功从URL加载图像: {pil_image.width}x{pil_image.height}")
-                                    
-                                    # 转换为ComfyUI格式
-                                    img_array = np.array(pil_image).astype(np.float32) / 255.0
-                                    img_tensor = torch.from_numpy(img_array).unsqueeze(0)
-                                    
-                                    # 构建返回文本
-                                    result_text = f"## GPT响应\n\n{text_content}\n\n"
-                                    result_text += f"\n## 处理信息\n已从URL加载图像: {urls[0]}"
-                                    result_text += f"\n种子: {seed}"
-                                    result_text += f"\n图像处理质量: {image_detail}"
-                                    result_text += f"\n估计token消耗: {token_estimation}"
-                                    result_text += f"\n\n## 处理日志\n" + "\n".join(self.log_messages)
-                                    
-                                    return (img_tensor, result_text)
-                            except Exception as e:
-                                self.log(f"从URL加载图像失败: {e}")
-                        
-                        elif base64_matches:
-                            # 如果找到base64数据，尝试解码
-                            self.log("在响应中发现base64编码的图像数据")
-                            try:
-                                img_data = base64.b64decode(base64_matches[0])
-                                buffer = BytesIO(img_data)
+                                # 添加超时和流式传输以提高稳健性
+                                img_response = requests.get(url, timeout=15, stream=True)
+                                img_response.raise_for_status() # 检查HTTP错误
+                                
+                                # 从URL加载图像
+                                buffer = BytesIO(img_response.content)
                                 pil_image = Image.open(buffer)
                                 
                                 # 确保是RGB模式
                                 if pil_image.mode != 'RGB':
                                     pil_image = pil_image.convert('RGB')
                                 
-                                self.log(f"成功从base64加载图像: {pil_image.width}x{pil_image.height}")
+                                self.log(f"成功从URL加载图像: {url} ({pil_image.width}x{pil_image.height})")
                                 
                                 # 转换为ComfyUI格式
                                 img_array = np.array(pil_image).astype(np.float32) / 255.0
-                                img_tensor = torch.from_numpy(img_array).unsqueeze(0)
+                                image_tensor = torch.from_numpy(img_array).unsqueeze(0)
                                 
                                 # 构建返回文本
                                 result_text = f"## GPT响应\n\n{text_content}\n\n"
-                                result_text += f"\n## 处理信息\n已从base64数据加载图像"
+                                result_text += f"\n## 处理信息\n已从URL加载图像: {url}"
                                 result_text += f"\n种子: {seed}"
                                 result_text += f"\n图像处理质量: {image_detail}"
                                 result_text += f"\n估计token消耗: {token_estimation}"
                                 result_text += f"\n\n## 处理日志\n" + "\n".join(self.log_messages)
                                 
-                                return (img_tensor, result_text)
+                                image_processed_successfully = True
+                                break # 成功找到并处理了一个URL，跳出循环
+                                
+                            except requests.exceptions.RequestException as req_err:
+                                self.log(f"  -> 从URL下载失败 (网络错误): {req_err}")
+                            except Image.UnidentifiedImageError:
+                                self.log(f"  -> 从URL下载的数据无法识别为图像")
                             except Exception as e:
-                                self.log(f"从base64数据加载图像失败: {e}")
+                                self.log(f"  -> 从URL加载或处理时发生未知错误: {e}")
+                                traceback.print_exc() # 打印更详细的错误堆栈
                         
-                        # 如果没有找到图像，返回空白图像
-                        self.log("在响应中未找到图像数据，返回空白图像")
+                        # --- 3. 如果所有URL都失败，尝试Base64 ---
+                        if not image_processed_successfully:
+                            base64_pattern = r'data:image\/[^;]+;base64,([a-zA-Z0-9+/=]+)'
+                            base64_matches = re.findall(base64_pattern, text_content)
+                            
+                            if base64_matches:
+                                self.log("尝试从Base64加载图像...")
+                                try:
+                                    img_data = base64.b64decode(base64_matches[0])
+                                    buffer = BytesIO(img_data)
+                                    pil_image = Image.open(buffer)
+                                    
+                                    if pil_image.mode != 'RGB':
+                                        pil_image = pil_image.convert('RGB')
+                                    
+                                    self.log(f"成功从Base64加载图像: {pil_image.width}x{pil_image.height}")
+                                    
+                                    img_array = np.array(pil_image).astype(np.float32) / 255.0
+                                    image_tensor = torch.from_numpy(img_array).unsqueeze(0)
+                                    
+                                    result_text = f"## GPT响应\n\n{text_content}\n\n"
+                                    result_text += f"\n## 处理信息\n已从Base64数据加载图像"
+                                    result_text += f"\n种子: {seed}"
+                                    result_text += f"\n图像处理质量: {image_detail}"
+                                    result_text += f"\n估计token消耗: {token_estimation}"
+                                    result_text += f"\n\n## 处理日志\n" + "\n".join(self.log_messages)
+                                    
+                                    image_processed_successfully = True
+                                    
+                                except Exception as e:
+                                    self.log(f"从Base64加载图像失败: {e}")
+                            
+                        # --- 4. 如果URL和Base64都失败，返回空白图像和警告 ---
+                        if not image_processed_successfully:
+                            self.log("在响应中未能成功处理图像数据，返回空白图像")
+                            
+                            # 创建空白图像
+                            image_tensor = self.generate_empty_image(512, 512)
+                            
+                            # 构建返回文本
+                            result_text = f"## GPT响应\n\n{text_content}\n\n"
+                            result_text += f"\n## 请求信息\n模型: {actual_model}\n提示词: {prompt}\n种子: {seed}"
+                            result_text += f"\n图像处理质量: {image_detail}"
+                            result_text += f"\n估计token消耗: {token_estimation}"
+                            result_text += f"\n\n## 警告\n未能从API响应中成功加载图像。"
+                            result_text += f"\n\n## 处理日志\n" + "\n".join(self.log_messages)
                         
-                        # 创建空白图像
-                        empty_img = self.generate_empty_image(512, 512)
-                        
-                        # 构建返回文本
-                        result_text = f"## GPT响应\n\n{text_content}\n\n"
-                        result_text += f"\n## 请求信息\n模型: {actual_model}\n提示词: {prompt}\n种子: {seed}"
-                        result_text += f"\n图像处理质量: {image_detail}"
-                        result_text += f"\n估计token消耗: {token_estimation}"
-                        result_text += f"\n\n## 处理日志\n" + "\n".join(self.log_messages)
-                        
-                        return (empty_img, result_text)
+                        # 返回结果
+                        return (image_tensor, result_text)
             
             except Exception as e:
                 error_message = f"处理API响应时出错: {str(e)}"
